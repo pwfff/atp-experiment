@@ -1,0 +1,5 @@
+tool	size	bytes	run	wall_s	mbit_s	verified
+atp2	8m	8388608	1	0.620	108.2	1
+atp2-plain	8m	8388608	1	0.580	115.7	1
+rsync-ssh	8m	8388608	1	1.378	48.7	1
+scp	8m	8388608	1	1.458	46.0	1

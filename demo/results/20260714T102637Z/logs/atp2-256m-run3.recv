@@ -1,0 +1,28 @@
+recv: control listening on 0.0.0.0:9440
+recv: cert sha256 fingerprint (give to sender as --pin):
+recv:   e8011812ed012ff43e2abef424d750ee16d4852c0eb4a00dec75f3b2d615cca5
+recv: sender runs: atp2 send <file> <this-host>:9440 --pin e8011812ed012ff43e2abef424d750ee16d4852c0eb4a00dec75f3b2d615cca5
+recv: control connection from [peer]
+recv: sealed session established (TLS 1.3, exporter key derived)
+recv: manifest payload-256m.bin: 268435456 bytes, 256 blocks, symbol 1200 B, udp :45349, gro on
+recv: 0/256 blocks, 0 pkts (0 late)
+recv: 12/256 blocks, 11584 pkts (528 late)
+recv: 26/256 blocks, 24120 pkts (1144 late)
+recv: 40/256 blocks, 36720 pkts (1760 late)
+recv: 52/256 blocks, 49060 pkts (2249 late)
+recv: 66/256 blocks, 61645 pkts (2865 late)
+recv: 80/256 blocks, 74154 pkts (3481 late)
+recv: 93/256 blocks, 86732 pkts (4053 late)
+recv: 107/256 blocks, 99202 pkts (4644 late)
+recv: 121/256 blocks, 111767 pkts (5260 late)
+recv: 134/256 blocks, 124377 pkts (5832 late)
+recv: 148/256 blocks, 136973 pkts (6448 late)
+recv: 161/256 blocks, 149331 pkts (7020 late)
+recv: 174/256 blocks, 162033 pkts (7592 late)
+recv: 188/256 blocks, 174525 pkts (8208 late)
+recv: 202/256 blocks, 186969 pkts (8824 late)
+recv: 214/256 blocks, 199530 pkts (9308 late)
+recv: 228/256 blocks, 212074 pkts (9924 late)
+recv: 242/256 blocks, 224410 pkts (10540 late)
+recv: 253/256 blocks, 234508 pkts (11024 late)
+recv: complete, sha256 verified — 268435456 bytes in 9.88s (217.3 Mbit/s), 234805 pkts, 11061 late

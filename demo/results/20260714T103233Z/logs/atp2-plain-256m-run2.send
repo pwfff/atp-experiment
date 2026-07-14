@@ -1,0 +1,6 @@
+send: payload-256m.bin (268435456 bytes, 256 blocks of ≤1048576 B, symbol 1200 B, sha256 2445d4c01c47c179)
+send: PLAINTEXT mode (--nocrypto)
+send: udp spray: 1220 B datagrams × 53/batch, gso on
+send: round 1 done, 252/256 blocks acked, 245664 pkts sent, est loss 1.9%
+send: round 2 done, 255/256 blocks acked, 245719 pkts sent, est loss 1.9%
+send: complete in 5.80s — 370.0 Mbit/s goodput, 245719 pkts / 299777180 B on the wire (89.5% efficient)

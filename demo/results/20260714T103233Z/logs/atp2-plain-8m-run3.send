@@ -1,0 +1,7 @@
+send: payload-8m.bin (8388608 bytes, 8 blocks of ≤1048576 B, symbol 1200 B, sha256 7dc944feb13d2638)
+send: PLAINTEXT mode (--nocrypto)
+send: udp spray: 1220 B datagrams × 53/batch, gso on
+send: round 1 done, 4/8 blocks acked, 7344 pkts sent, est loss 0.0%
+send: round 2 done, 7/8 blocks acked, 7399 pkts sent, est loss 0.0%
+send: round 3 done, 8/8 blocks acked, 7465 pkts sent, est loss 0.0%
+send: complete in 0.37s — 183.7 Mbit/s goodput, 7465 pkts / 9107300 B on the wire (92.1% efficient)

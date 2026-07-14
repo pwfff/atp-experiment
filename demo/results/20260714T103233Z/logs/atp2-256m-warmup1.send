@@ -1,0 +1,12 @@
+send: payload-256m.bin (268435456 bytes, 256 blocks of ≤1048576 B, symbol 1200 B, sha256 2445d4c01c47c179)
+send: sealed session established (TLS 1.3, cert pinned, exporter key derived)
+send: udp spray: 1244 B datagrams × 52/batch, gso on
+send: round 1 done, 236/256 blocks acked, 235008 pkts sent, est loss 1.3%
+send: round 2 done, 241/256 blocks acked, 235943 pkts sent, est loss 1.3%
+send: round 3 done, 244/256 blocks acked, 236735 pkts sent, est loss 1.3%
+send: round 4 done, 249/256 blocks acked, 237274 pkts sent, est loss 1.3%
+send: round 5 done, 252/256 blocks acked, 237626 pkts sent, est loss 1.3%
+send: round 6 done, 255/256 blocks acked, 237714 pkts sent, est loss 1.3%
+send: round 7 done, 255/256 blocks acked, 237802 pkts sent, est loss 1.3%
+send: round 8 done, 255/256 blocks acked, 237890 pkts sent, est loss 1.3%
+send: complete in 6.40s — 335.7 Mbit/s goodput, 237890 pkts / 295935160 B on the wire (90.7% efficient)

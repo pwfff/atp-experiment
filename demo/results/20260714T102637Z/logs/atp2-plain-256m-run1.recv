@@ -1,0 +1,24 @@
+recv: control listening on 0.0.0.0:9440
+recv: PLAINTEXT mode (--nocrypto)
+recv: control connection from [peer]
+recv: manifest payload-256m.bin: 268435456 bytes, 256 blocks, symbol 1200 B, udp :41688, gro on
+recv: 0/256 blocks, 0 pkts (0 late)
+recv: 12/256 blocks, 11820 pkts (528 late)
+recv: 25/256 blocks, 24614 pkts (1969 late)
+recv: 38/256 blocks, 37432 pkts (3425 late)
+recv: 52/256 blocks, 50221 pkts (4773 late)
+recv: 65/256 blocks, 62925 pkts (5907 late)
+recv: 78/256 blocks, 75877 pkts (6915 late)
+recv: 92/256 blocks, 88663 pkts (7835 late)
+recv: 106/256 blocks, 101291 pkts (8647 late)
+recv: 120/256 blocks, 114216 pkts (9336 late)
+recv: 133/256 blocks, 127102 pkts (10017 late)
+recv: 147/256 blocks, 139896 pkts (10656 late)
+recv: 161/256 blocks, 152719 pkts (11274 late)
+recv: 175/256 blocks, 165526 pkts (11890 late)
+recv: 189/256 blocks, 178320 pkts (12506 late)
+recv: 203/256 blocks, 191127 pkts (13122 late)
+recv: 217/256 blocks, 203956 pkts (13738 late)
+recv: 231/256 blocks, 216719 pkts (14354 late)
+recv: 245/256 blocks, 229545 pkts (14970 late)
+recv: complete, sha256 verified — 268435456 bytes in 9.67s (222.0 Mbit/s), 239157 pkts, 15413 late
