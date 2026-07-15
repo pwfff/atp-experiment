@@ -3,7 +3,7 @@
        Median of 3 SHA-256-verified runs per cell; run 20260715T165807Z in
        demo/results/. Throughput = payload bytes / wall time, so every tool
        pays its own connection setup. rclone-sftp runs the fairness flags
-       (see demo/remote_bench.sh); --multi-thread-streams cannot engage over
+       (see demo/remote_bench.sh); multi-thread streams cannot engage over
        sftp (no OpenWriterAt/OpenChunkWriter — verified, it is a silent
        no-op). Colors legible on light + dark themes. -->
 
