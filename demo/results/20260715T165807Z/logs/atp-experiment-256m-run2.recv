@@ -1,0 +1,17 @@
+recv: control listening on 0.0.0.0:9440
+recv: cert sha256 fingerprint (give to sender as --pin):
+recv:   19c385fb61934355d98f4bdc67e9c7decc27e2a37341dfa6e44f01d0e23ae0bf
+recv: sender runs: atp-experiment send <file> <this-host>:9440 --pin 19c385fb61934355d98f4bdc67e9c7decc27e2a37341dfa6e44f01d0e23ae0bf
+recv: control connection from [peer]
+recv: sealed session established (TLS 1.3, exporter key derived)
+recv: manifest payload-256m.bin: 268435456 bytes, 256 blocks, symbol 1200 B, udp :52221, gro on
+recv: 4/256 blocks, 4444 pkts (176 late)
+recv: 31/256 blocks, 37462 pkts (1284 late)
+recv: 58/256 blocks, 77102 pkts (3938 late)
+recv: 90/256 blocks, 115345 pkts (9844 late)
+recv: 125/256 blocks, 150113 pkts (12482 late)
+recv: 162/256 blocks, 185363 pkts (14264 late)
+recv: 193/256 blocks, 223342 pkts (15923 late)
+recv: 223/256 blocks, 235080 pkts (18495 late)
+recv: 255/256 blocks, 249218 pkts (25492 late)
+recv: complete, sha256 verified — 268435456 bytes in 4.73s (454.2 Mbit/s), 249318 pkts, 25572 late

@@ -192,11 +192,21 @@ run_one() {
         # transport as the rsync/scp cells (external ssh binary, no
         # compression, aes128-gcm). --inplace matches rsync --inplace;
         # concurrency doubled from the default 64 to keep the request
-        # window comfortably past this path's BDP.
+        # window comfortably past this path's BDP. Fairness flags, each
+        # removing work rsync doesn't do (an on-the-fly :sftp: remote
+        # can't cache discovery, so it would otherwise repeat every run):
+        #   --sftp-shell-type unix       skip shell detection (1 ssh handshake)
+        #   --sftp-disable-hashcheck     skip md5sum/sha1sum probing (2
+        #                                handshakes) + post-transfer remote
+        #                                re-hash (1 handshake + full file
+        #                                read); rsync -W checksums nothing,
+        #                                and the harness sha256-verifies
+        #                                every transfer out-of-band anyway
         t0=$(now)
         rclone copyto "$payload" ":sftp:$rfile" \
             --sftp-ssh "ssh -T -x -o Compression=no -o ControlPath=none -c aes128-gcm@openssh.com $HOST" \
-            --sftp-concurrency 128 --inplace -q 2>"$log.send" || rc=$?
+            --sftp-concurrency 128 --sftp-shell-type unix --sftp-disable-hashcheck \
+            --inplace -q 2>"$log.send" || rc=$?
         t1=$(now)
         ;;
     *) echo "unknown tool: $tool" >&2; exit 1 ;;

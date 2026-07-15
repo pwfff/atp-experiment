@@ -47,9 +47,19 @@ at 20%/50 ms.)
 ## remote_bench.sh — real-internet bench vs rsync/scp/rclone
 
 Benchmarks atp-experiment against maximally-tuned rsync-over-ssh, scp, and
-rclone-over-sftp (riding the same tuned openssh transport, external ssh
-binary, `--sftp-concurrency 128 --inplace`) between this machine and a
-real remote host, following the bench methodology of the
+rclone-over-sftp between this machine and a real remote host. The rclone
+cell rides the same tuned openssh transport (external ssh binary,
+aes128-gcm, no compression, `--sftp-concurrency 128 --inplace`) and
+disables work rsync doesn't do — shell/hash-command discovery and the
+post-transfer remote re-hash cost five extra ssh handshakes plus a full
+remote file read per run (`--sftp-shell-type unix
+--sftp-disable-hashcheck`; the harness sha256-verifies every transfer
+out-of-band regardless). Note `--multi-thread-streams` cannot help here:
+the sftp backend supports neither `OpenWriterAt` nor `OpenChunkWriter`,
+so rclone silently falls back to a single stream — verified with
+`rclone backend features` and by timing 4/8/16 streams (no change).
+Parallel-stream rclone is a cloud-backend (S3/GCS/B2) trick, not an ssh
+trick. Methodology follows that of the
 original [atp](https://github.com/Dicklesworthstone/atp) (see the
 top-level README's Provenance section): incompressible urandom payloads,
 always-empty destination, rsync at its fastest (`-aW --inplace`, no
@@ -90,16 +100,21 @@ table, medians + atp-experiment/rsync ratio), `results.tsv` (raw runs),
 `conditions.txt` (link/host facts), `logs/` (per-run sender/receiver
 stderr, including atp-experiment's loss/efficiency lines).
 
-### Sample result (2026-07-15, home → Linode, 42 ms RTT, ~500 Mbit path)
+### Sample result (2026-07-15, home → Linode, 43 ms RTT, ~500 Mbit path)
 
 Adaptive pacing (default, no link probing), medians of 3 verified runs
-(run `20260715T163133Z` in `results/`):
+(run `20260715T165807Z` in `results/`):
 
 | payload | atp-experiment (sealed, adaptive) | rsync-ssh | rclone-sftp | atp-experiment / rsync-ssh |
 |---|---|---|---|---|
-| 8 MiB | 1.07 s (63 Mbit/s) | 1.36 s (49 Mbit/s) | 4.24 s (16 Mbit/s) | **0.78** |
-| 64 MiB | 2.24 s (239 Mbit/s) | 2.50 s (215 Mbit/s) | 5.58 s (96 Mbit/s) | **0.90** |
-| 256 MiB | 5.13 s (419 Mbit/s) | 6.62 s (324 Mbit/s) | 9.98 s (215 Mbit/s) | **0.77** |
+| 8 MiB | 0.72 s (94 Mbit/s) | 1.36 s (50 Mbit/s) | 1.68 s (40 Mbit/s) | **0.53** |
+| 64 MiB | 2.17 s (248 Mbit/s) | 2.57 s (209 Mbit/s) | 2.72 s (198 Mbit/s) | **0.84** |
+| 256 MiB | 5.15 s (417 Mbit/s) | 6.71 s (320 Mbit/s) | 6.67 s (322 Mbit/s) | **0.77** |
+
+An earlier same-day run (`20260715T163133Z`) measured rclone-sftp before
+the fairness flags: 4.24 / 5.58 / 9.98 s — the delta is five ssh
+handshakes of discovery plus the post-transfer remote md5sum, not
+transfer speed.
 
 ### Earlier run (2026-07-14, same link, pre-rclone)
 

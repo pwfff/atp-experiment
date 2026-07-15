@@ -19,7 +19,7 @@ recv: cert sha256 fingerprint (give to sender as --pin):
 recv:   055951b19c666f1f0e920b846b9aa2dee8a8270cc84d8694dabd64e10f765c8d
 
 $ atp-experiment send big.bin host:9440 --pin 055951b19c666f1f0e920b846b9aa2dee8a8270cc84d8694dabd64e10f765c8d
-send: complete in 5.13s — 418.7 Mbit/s goodput
+send: complete in 5.15s — 416.7 Mbit/s goodput
 ```
 
 ## Why
@@ -43,21 +43,25 @@ datagrams is the whole trick.
 case), adaptive pacing, medians of 3, SHA-256 verified. Opponents:
 rsync-over-ssh at its fastest configuration (`-aW --inplace`, no
 compression, aes128-gcm) and rclone over sftp riding the same tuned
-openssh transport (`--sftp-concurrency 128 --inplace`):
+openssh transport, with its discovery/hash-check overhead disabled to
+match (see `demo/remote_bench.sh` for the exact flags):
 
-![Measured WAN throughput, medians of 3: atp-experiment reaches 63/239/419 Mbit/s at 8/64/256 MiB vs 49/215/324 for tuned rsync-ssh and 16/96/215 for tuned rclone-sftp](assets/wan-throughput.svg)
+![Measured WAN throughput, medians of 3: atp-experiment reaches 94/248/417 Mbit/s at 8/64/256 MiB vs 50/209/320 for tuned rsync-ssh and 40/198/322 for tuned rclone-sftp](assets/wan-throughput.svg)
 
 | payload | atp-experiment (sealed) | rsync-ssh | rclone-sftp | wall vs rsync |
 |---|---|---|---|---|
-| 8 MiB | 1.07 s (63 Mbit/s) | 1.36 s (49 Mbit/s) | 4.24 s (16 Mbit/s) | **0.78** |
-| 64 MiB | 2.24 s (239 Mbit/s) | 2.50 s (215 Mbit/s) | 5.58 s (96 Mbit/s) | **0.90** |
-| 256 MiB | 5.13 s (419 Mbit/s) | 6.62 s (324 Mbit/s) | 9.98 s (215 Mbit/s) | **0.77** |
+| 8 MiB | 0.72 s (94 Mbit/s) | 1.36 s (50 Mbit/s) | 1.68 s (40 Mbit/s) | **0.53** |
+| 64 MiB | 2.17 s (248 Mbit/s) | 2.57 s (209 Mbit/s) | 2.72 s (198 Mbit/s) | **0.84** |
+| 256 MiB | 5.15 s (417 Mbit/s) | 6.71 s (320 Mbit/s) | 6.67 s (322 Mbit/s) | **0.77** |
 
 Every cell wins on TCP's home turf: small transfers on handshake
 economics (one TLS round trip, then spray), large ones on ramp speed
 and wire efficiency. No rate flag was set — the controller found the
-path by itself. rclone additionally pays sftp's multi-round-trip setup
-and request windowing. Raw runs live in `demo/results/`.
+path by itself. rclone at parity with rsync is the expected result —
+over sftp both are a single TCP stream through the same openssh pipe,
+and rclone's `--multi-thread-streams` cannot engage there (sftp lacks
+parallel ranged writes; verified a silent no-op). Raw runs live in
+`demo/results/`.
 
 **Emulated loss** (256 MiB, 500 Mbit / 50 ms RTT, `tc netem`, medians
 of 3): goodput holds **315 / 347 / 346 / 258 Mbit/s at 0 / 5 / 10 / 20%

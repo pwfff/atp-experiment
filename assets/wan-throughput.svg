@@ -1,10 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 420" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="13">
-  <!-- Real-internet bench (2026-07-15, home -> VPS, 42 ms RTT, ~500 Mbit path).
-       Median of 3 SHA-256-verified runs per cell; run 20260715T163133Z in
+  <!-- Real-internet bench (2026-07-15, home -> VPS, 43 ms RTT, ~500 Mbit path).
+       Median of 3 SHA-256-verified runs per cell; run 20260715T165807Z in
        demo/results/. Throughput = payload bytes / wall time, so every tool
-       pays its own connection setup. Colors legible on light + dark themes. -->
+       pays its own connection setup. rclone-sftp runs the fairness flags
+       (see demo/remote_bench.sh); --multi-thread-streams cannot engage over
+       sftp (no OpenWriterAt/OpenChunkWriter — verified, it is a silent
+       no-op). Colors legible on light + dark themes. -->
 
-  <text x="70" y="20" fill="#8b8b8b" font-size="14">Real internet, home → VPS — 42 ms RTT, ~500 Mbit path (medians of 3, SHA-256 verified)</text>
+  <text x="70" y="20" fill="#8b8b8b" font-size="14">Real internet, home → VPS — 43 ms RTT, ~500 Mbit path (medians of 3, SHA-256 verified)</text>
 
   <!-- legend -->
   <g font-size="13">
@@ -34,30 +37,30 @@
   <text x="18" y="195" fill="#8b8b8b" text-anchor="middle" transform="rotate(-90 18 195)">throughput (Mbit/s)</text>
 
   <!-- 8 MiB group -->
-  <rect x="97" y="306.6" width="50" height="43.4" fill="#3fb950"/>
-  <rect x="155" y="316.0" width="50" height="34.0" fill="#58a6ff"/>
-  <rect x="213" y="339.1" width="50" height="10.9" fill="#d29922"/>
-  <text x="122" y="300.6" fill="#3fb950" text-anchor="middle" font-size="12">63</text>
-  <text x="180" y="310.0" fill="#58a6ff" text-anchor="middle" font-size="12">49</text>
-  <text x="238" y="333.1" fill="#d29922" text-anchor="middle" font-size="12">16</text>
+  <rect x="97" y="285.4" width="50" height="64.6" fill="#3fb950"/>
+  <rect x="155" y="315.9" width="50" height="34.1" fill="#58a6ff"/>
+  <rect x="213" y="322.5" width="50" height="27.5" fill="#d29922"/>
+  <text x="122" y="279.4" fill="#3fb950" text-anchor="middle" font-size="12">94</text>
+  <text x="180" y="309.9" fill="#58a6ff" text-anchor="middle" font-size="12">50</text>
+  <text x="238" y="316.5" fill="#d29922" text-anchor="middle" font-size="12">40</text>
   <text x="180" y="372" fill="#8b8b8b" text-anchor="middle">8 MiB</text>
 
   <!-- 64 MiB group -->
-  <rect x="317" y="185.1" width="50" height="164.9" fill="#3fb950"/>
-  <rect x="375" y="202.1" width="50" height="147.9" fill="#58a6ff"/>
-  <rect x="433" y="283.7" width="50" height="66.3" fill="#d29922"/>
-  <text x="342" y="179.1" fill="#3fb950" text-anchor="middle" font-size="12">239</text>
-  <text x="400" y="196.1" fill="#58a6ff" text-anchor="middle" font-size="12">215</text>
-  <text x="458" y="277.7" fill="#d29922" text-anchor="middle" font-size="12">96</text>
+  <rect x="317" y="179.2" width="50" height="170.8" fill="#3fb950"/>
+  <rect x="375" y="206.0" width="50" height="144.0" fill="#58a6ff"/>
+  <rect x="433" y="213.8" width="50" height="136.2" fill="#d29922"/>
+  <text x="342" y="173.2" fill="#3fb950" text-anchor="middle" font-size="12">248</text>
+  <text x="400" y="200.0" fill="#58a6ff" text-anchor="middle" font-size="12">209</text>
+  <text x="458" y="207.8" fill="#d29922" text-anchor="middle" font-size="12">198</text>
   <text x="400" y="372" fill="#8b8b8b" text-anchor="middle">64 MiB</text>
 
   <!-- 256 MiB group -->
-  <rect x="537" y="61.6" width="50" height="288.4" fill="#3fb950"/>
-  <rect x="595" y="126.5" width="50" height="223.5" fill="#58a6ff"/>
-  <rect x="653" y="201.8" width="50" height="148.2" fill="#d29922"/>
-  <text x="562" y="55.6" fill="#3fb950" text-anchor="middle" font-size="12">419</text>
-  <text x="620" y="120.5" fill="#58a6ff" text-anchor="middle" font-size="12">324</text>
-  <text x="678" y="195.8" fill="#d29922" text-anchor="middle" font-size="12">215</text>
+  <rect x="537" y="62.9" width="50" height="287.1" fill="#3fb950"/>
+  <rect x="595" y="129.6" width="50" height="220.4" fill="#58a6ff"/>
+  <rect x="653" y="128.1" width="50" height="221.9" fill="#d29922"/>
+  <text x="562" y="56.9" fill="#3fb950" text-anchor="middle" font-size="12">417</text>
+  <text x="620" y="123.6" fill="#58a6ff" text-anchor="middle" font-size="12">320</text>
+  <text x="678" y="122.1" fill="#d29922" text-anchor="middle" font-size="12">322</text>
   <text x="620" y="372" fill="#8b8b8b" text-anchor="middle">256 MiB</text>
 
   <text x="400" y="398" fill="#8b8b8b" text-anchor="middle">payload size</text>
