@@ -59,7 +59,14 @@ the sftp backend supports neither `OpenWriterAt` nor `OpenChunkWriter`,
 so rclone silently falls back to a single stream — verified with
 `rclone backend features` and by timing 4/8/16 streams (no change).
 Parallel-stream rclone is a cloud-backend (S3/GCS/B2) trick, not an ssh
-trick. Methodology follows that of the
+trick. The other sftp knobs were swept on the 256 MiB payload and don't
+move it either: chunk-size 32k/255k × concurrency 64/128/256 ×
+connections 1/16 all land at 6.6–6.9 s (~315–325 Mbit/s). Once the
+request window (chunk × concurrency) covers the path's BDP, sftp sits
+at the same single-TCP-stream openssh ceiling rsync sits at — their
+256 MiB medians agreeing at ~320 Mbit/s is that ceiling, measured
+twice. (`--sftp-connections` is a pool cap, not a parallelizer; a
+single-file copy uses one connection regardless.) Methodology follows that of the
 original [atp](https://github.com/Dicklesworthstone/atp) (see the
 top-level README's Provenance section): incompressible urandom payloads,
 always-empty destination, rsync at its fastest (`-aW --inplace`, no
