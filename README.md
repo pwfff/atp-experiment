@@ -19,7 +19,7 @@ recv: cert sha256 fingerprint (give to sender as --pin):
 recv:   055951b19c666f1f0e920b846b9aa2dee8a8270cc84d8694dabd64e10f765c8d
 
 $ atp-experiment send big.bin host:9440 --pin 055951b19c666f1f0e920b846b9aa2dee8a8270cc84d8694dabd64e10f765c8d
-send: complete in 5.59s — 384.3 Mbit/s goodput
+send: complete in 5.13s — 418.7 Mbit/s goodput
 ```
 
 ## Why
@@ -40,24 +40,32 @@ datagrams is the whole trick.
 ## Measured
 
 **Real internet** (42 ms RTT, ~500 Mbit path, clean link — TCP's best
-case), adaptive pacing, medians, SHA-256 verified, vs rsync-over-ssh at
-its fastest configuration (`-aW --inplace`, no compression, aes128-gcm):
+case), adaptive pacing, medians of 3, SHA-256 verified. Opponents:
+rsync-over-ssh at its fastest configuration (`-aW --inplace`, no
+compression, aes128-gcm) and rclone over sftp riding the same tuned
+openssh transport (`--sftp-concurrency 128 --inplace`):
 
-| payload | atp-experiment (sealed) | rsync-ssh | wall ratio |
-|---|---|---|---|
-| 8 MiB | 0.63 s (106 Mbit/s) | 1.40 s (48 Mbit/s) | **0.45** |
-| 64 MiB | 2.10 s (256 Mbit/s) | 2.54 s (211 Mbit/s) | **0.82** |
-| 256 MiB | 5.59 s (384 Mbit/s) | 6.56 s (327 Mbit/s) | **0.85** |
+![Measured WAN throughput, medians of 3: atp-experiment reaches 63/239/419 Mbit/s at 8/64/256 MiB vs 49/215/324 for tuned rsync-ssh and 16/96/215 for tuned rclone-sftp](assets/wan-throughput.svg)
 
-Small transfers win on handshake economics (one TLS round trip, then
-spray); large ones on ramp speed and wire efficiency. No rate flag was
-set — the controller found the path by itself.
+| payload | atp-experiment (sealed) | rsync-ssh | rclone-sftp | wall vs rsync |
+|---|---|---|---|---|
+| 8 MiB | 1.07 s (63 Mbit/s) | 1.36 s (49 Mbit/s) | 4.24 s (16 Mbit/s) | **0.78** |
+| 64 MiB | 2.24 s (239 Mbit/s) | 2.50 s (215 Mbit/s) | 5.58 s (96 Mbit/s) | **0.90** |
+| 256 MiB | 5.13 s (419 Mbit/s) | 6.62 s (324 Mbit/s) | 9.98 s (215 Mbit/s) | **0.77** |
+
+Every cell wins on TCP's home turf: small transfers on handshake
+economics (one TLS round trip, then spray), large ones on ramp speed
+and wire efficiency. No rate flag was set — the controller found the
+path by itself. rclone additionally pays sftp's multi-round-trip setup
+and request windowing. Raw runs live in `demo/results/`.
 
 **Emulated loss** (256 MiB, 500 Mbit / 50 ms RTT, `tc netem`, medians
 of 3): goodput holds **315 / 347 / 346 / 258 Mbit/s at 0 / 5 / 10 / 20%
-loss**. The TCP formula gives rsync ~1 Mbit/s at the 5% point of that
-table. Reproduce with `demo/netns.sh` (rootless netns + netem pair, no
-sudo) — see `demo/README.md`.
+loss**. The standard TCP throughput bound `MSS/(RTT·√p)` caps rsync,
+scp, and every HTTPS download on that link at **~1 Mbit/s from 5% loss
+up** — a ~300× gap, not because atp is fast but because TCP misreads
+random loss as congestion. Reproduce with `demo/netns.sh` (rootless
+netns + netem pair, no sudo) — see `demo/README.md`.
 
 ## Design
 

@@ -44,10 +44,12 @@ Goodput is flat through 10% loss and degrades gently at 20% — the demo
 claim. (TCP throughput ∝ `MSS/(RTT·√p)` gives scp well under 1 Mbit/s
 at 20%/50 ms.)
 
-## remote_bench.sh — real-internet bench vs rsync/scp
+## remote_bench.sh — real-internet bench vs rsync/scp/rclone
 
-Benchmarks atp-experiment against maximally-tuned rsync-over-ssh and scp between this
-machine and a real remote host, following the bench methodology of the
+Benchmarks atp-experiment against maximally-tuned rsync-over-ssh, scp, and
+rclone-over-sftp (riding the same tuned openssh transport, external ssh
+binary, `--sftp-concurrency 128 --inplace`) between this machine and a
+real remote host, following the bench methodology of the
 original [atp](https://github.com/Dicklesworthstone/atp) (see the
 top-level README's Provenance section): incompressible urandom payloads,
 always-empty destination, rsync at its fastest (`-aW --inplace`, no
@@ -68,7 +70,7 @@ No scripts are copied to the remote. Remove all remote state with
 
 ```bash
 demo/remote_bench.sh <ssh-host> [--sizes 8m,64m,256m] \
-    [--runs 3] [--warmup 1] [--tools atp-experiment,atp-experiment-plain,rsync-ssh,scp] \
+    [--runs 3] [--warmup 1] [--tools atp-experiment,atp-experiment-plain,rsync-ssh,scp,rclone-sftp] \
     [--rate-mbps N] [--addr <network-name>] [--port 9440] [--out <dir>] [--keep]
 ```
 
@@ -88,9 +90,20 @@ table, medians + atp-experiment/rsync ratio), `results.tsv` (raw runs),
 `conditions.txt` (link/host facts), `logs/` (per-run sender/receiver
 stderr, including atp-experiment's loss/efficiency lines).
 
-### Sample result (2026-07-14, home → Linode, 42 ms RTT, ~500 Mbit path)
+### Sample result (2026-07-15, home → Linode, 42 ms RTT, ~500 Mbit path)
 
-Adaptive pacing (default, no link probing), medians of 2 verified runs:
+Adaptive pacing (default, no link probing), medians of 3 verified runs
+(run `20260715T163133Z` in `results/`):
+
+| payload | atp-experiment (sealed, adaptive) | rsync-ssh | rclone-sftp | atp-experiment / rsync-ssh |
+|---|---|---|---|---|
+| 8 MiB | 1.07 s (63 Mbit/s) | 1.36 s (49 Mbit/s) | 4.24 s (16 Mbit/s) | **0.78** |
+| 64 MiB | 2.24 s (239 Mbit/s) | 2.50 s (215 Mbit/s) | 5.58 s (96 Mbit/s) | **0.90** |
+| 256 MiB | 5.13 s (419 Mbit/s) | 6.62 s (324 Mbit/s) | 9.98 s (215 Mbit/s) | **0.77** |
+
+### Earlier run (2026-07-14, same link, pre-rclone)
+
+Adaptive pacing, medians of 2 verified runs:
 
 | payload | atp-experiment (sealed, adaptive) | rsync-ssh | atp-experiment / rsync-ssh |
 |---|---|---|---|

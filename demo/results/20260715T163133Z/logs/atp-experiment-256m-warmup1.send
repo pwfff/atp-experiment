@@ -1,0 +1,15 @@
+send: payload-256m.bin (268435456 bytes, 256 blocks of ≤1048576 B, symbol 1200 B, sha256 2445d4c01c47c179)
+send: sealed session established (TLS 1.3, cert pinned, exporter key derived)
+send: udp spray: 1244 B datagrams × 52/batch, gso on, pacing adaptive (start 100, cap 5000 Mbit/s)
+send: round 1 done, 158/256 blocks acked, 290214 pkts sent, est loss 40.9%, pacing 283 Mbit/s
+send: round 2 done, 226/256 blocks acked, 356127 pkts sent, est loss 17.4%, pacing 150 Mbit/s
+send: round 3 done, 242/256 blocks acked, 364155 pkts sent, est loss 7.4%, pacing 122 Mbit/s
+send: round 4 done, 244/256 blocks acked, 365306 pkts sent, est loss 3.6%, pacing 122 Mbit/s
+send: round 5 done, 246/256 blocks acked, 366274 pkts sent, est loss 1.8%, pacing 122 Mbit/s
+send: round 6 done, 249/256 blocks acked, 366890 pkts sent, est loss 1.2%, pacing 122 Mbit/s
+send: round 7 done, 251/256 blocks acked, 367330 pkts sent, est loss 0.9%, pacing 122 Mbit/s
+send: round 8 done, 254/256 blocks acked, 367506 pkts sent, est loss 0.4%, pacing 122 Mbit/s
+send: round 9 done, 254/256 blocks acked, 367682 pkts sent, est loss 0.3%, pacing 122 Mbit/s
+send: round 10 done, 255/256 blocks acked, 367770 pkts sent, est loss 0.2%, pacing 122 Mbit/s
+send: round 11 done, 255/256 blocks acked, 367858 pkts sent, est loss 0.2%, pacing 122 Mbit/s
+send: complete in 10.78s — 199.3 Mbit/s goodput, 367858 pkts / 457615352 B on the wire (58.7% efficient)

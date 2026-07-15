@@ -30,7 +30,7 @@ options:
   --sizes <list>      comma-separated payload sizes (default 8m,64m,256m)
   --runs <n>          measured runs per cell (default 3)
   --warmup <n>        warmup runs per cell, untimed (default 1)
-  --tools <list>      default atp-experiment,atp-experiment-plain,rsync-ssh,scp
+  --tools <list>      default atp-experiment,atp-experiment-plain,rsync-ssh,scp,rclone-sftp
   --rate-mbps <n>     pin atp-experiment to a static pacing rate (default: adaptive
                       rate control; 0 = unpaced)
   --out <dir>         results dir (default demo/results/<utc-timestamp>)
@@ -42,7 +42,7 @@ EOF
 [ $# -ge 1 ] || usage
 HOST=$1; shift
 ADDR="" PORT=9440 SIZES="8m,64m,256m" RUNS=3 WARMUP=1
-TOOLS="atp-experiment,atp-experiment-plain,rsync-ssh,scp" RATE="" OUT="" KEEP=0
+TOOLS="atp-experiment,atp-experiment-plain,rsync-ssh,scp,rclone-sftp" RATE="" OUT="" KEEP=0
 
 while [ $# -gt 0 ]; do
     case $1 in
@@ -185,6 +185,18 @@ run_one() {
         t0=$(now)
         scp -q -o Compression=no -o ControlPath=none -c aes128-gcm@openssh.com \
             "$payload" "$HOST:$rfile" 2>"$log.send" || rc=$?
+        t1=$(now)
+        ;;
+    rclone-sftp)
+        # rclone over its sftp backend, riding the same tuned openssh
+        # transport as the rsync/scp cells (external ssh binary, no
+        # compression, aes128-gcm). --inplace matches rsync --inplace;
+        # concurrency doubled from the default 64 to keep the request
+        # window comfortably past this path's BDP.
+        t0=$(now)
+        rclone copyto "$payload" ":sftp:$rfile" \
+            --sftp-ssh "ssh -T -x -o Compression=no -o ControlPath=none -c aes128-gcm@openssh.com $HOST" \
+            --sftp-concurrency 128 --inplace -q 2>"$log.send" || rc=$?
         t1=$(now)
         ;;
     *) echo "unknown tool: $tool" >&2; exit 1 ;;

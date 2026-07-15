@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 420" font-family="ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="13">
+  <!-- Real-internet bench (2026-07-15, home -> VPS, 42 ms RTT, ~500 Mbit path).
+       Median of 3 SHA-256-verified runs per cell; run 20260715T163133Z in
+       demo/results/. Throughput = payload bytes / wall time, so every tool
+       pays its own connection setup. Colors legible on light + dark themes. -->
+
+  <text x="70" y="20" fill="#8b8b8b" font-size="14">Real internet, home → VPS — 42 ms RTT, ~500 Mbit path (medians of 3, SHA-256 verified)</text>
+
+  <!-- legend -->
+  <g font-size="13">
+    <rect x="70" y="32" width="12" height="12" fill="#3fb950"/>
+    <text x="88" y="43" fill="#8b8b8b">atp-experiment (sealed)</text>
+    <rect x="260" y="32" width="12" height="12" fill="#58a6ff"/>
+    <text x="278" y="43" fill="#8b8b8b">rsync-ssh (tuned)</text>
+    <rect x="420" y="32" width="12" height="12" fill="#d29922"/>
+    <text x="438" y="43" fill="#8b8b8b">rclone-sftp (tuned)</text>
+  </g>
+
+  <!-- gridlines + y tick labels (0..400 Mbit/s) -->
+  <g stroke="#888888" stroke-opacity="0.25">
+    <line x1="70" y1="281.1" x2="730" y2="281.1"/>
+    <line x1="70" y1="212.2" x2="730" y2="212.2"/>
+    <line x1="70" y1="143.3" x2="730" y2="143.3"/>
+    <line x1="70" y1="74.4" x2="730" y2="74.4"/>
+  </g>
+  <line x1="70" y1="350" x2="730" y2="350" stroke="#888888" stroke-opacity="0.6"/>
+  <g fill="#8b8b8b" text-anchor="end">
+    <text x="60" y="354">0</text>
+    <text x="60" y="285">100</text>
+    <text x="60" y="216">200</text>
+    <text x="60" y="147">300</text>
+    <text x="60" y="78">400</text>
+  </g>
+  <text x="18" y="195" fill="#8b8b8b" text-anchor="middle" transform="rotate(-90 18 195)">throughput (Mbit/s)</text>
+
+  <!-- 8 MiB group -->
+  <rect x="97" y="306.6" width="50" height="43.4" fill="#3fb950"/>
+  <rect x="155" y="316.0" width="50" height="34.0" fill="#58a6ff"/>
+  <rect x="213" y="339.1" width="50" height="10.9" fill="#d29922"/>
+  <text x="122" y="300.6" fill="#3fb950" text-anchor="middle" font-size="12">63</text>
+  <text x="180" y="310.0" fill="#58a6ff" text-anchor="middle" font-size="12">49</text>
+  <text x="238" y="333.1" fill="#d29922" text-anchor="middle" font-size="12">16</text>
+  <text x="180" y="372" fill="#8b8b8b" text-anchor="middle">8 MiB</text>
+
+  <!-- 64 MiB group -->
+  <rect x="317" y="185.1" width="50" height="164.9" fill="#3fb950"/>
+  <rect x="375" y="202.1" width="50" height="147.9" fill="#58a6ff"/>
+  <rect x="433" y="283.7" width="50" height="66.3" fill="#d29922"/>
+  <text x="342" y="179.1" fill="#3fb950" text-anchor="middle" font-size="12">239</text>
+  <text x="400" y="196.1" fill="#58a6ff" text-anchor="middle" font-size="12">215</text>
+  <text x="458" y="277.7" fill="#d29922" text-anchor="middle" font-size="12">96</text>
+  <text x="400" y="372" fill="#8b8b8b" text-anchor="middle">64 MiB</text>
+
+  <!-- 256 MiB group -->
+  <rect x="537" y="61.6" width="50" height="288.4" fill="#3fb950"/>
+  <rect x="595" y="126.5" width="50" height="223.5" fill="#58a6ff"/>
+  <rect x="653" y="201.8" width="50" height="148.2" fill="#d29922"/>
+  <text x="562" y="55.6" fill="#3fb950" text-anchor="middle" font-size="12">419</text>
+  <text x="620" y="120.5" fill="#58a6ff" text-anchor="middle" font-size="12">324</text>
+  <text x="678" y="195.8" fill="#d29922" text-anchor="middle" font-size="12">215</text>
+  <text x="620" y="372" fill="#8b8b8b" text-anchor="middle">256 MiB</text>
+
+  <text x="400" y="398" fill="#8b8b8b" text-anchor="middle">payload size</text>
+</svg>
