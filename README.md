@@ -22,6 +22,21 @@ $ atp-experiment send big.bin host:9440 --pin 055951b19c666f1f0e920b846b9aa2dee8
 send: complete in 5.15s — 416.7 Mbit/s goodput
 ```
 
+That's **push** mode: the sender dials a listening receiver (handy on a
+LAN). The inverse is **pull** mode — the client connects to the server and
+the file streams back, the ordinary download/browser model:
+
+```
+$ atp-experiment send big.bin --listen 0.0.0.0:9440 --udp-port 9441 --nocrypto   # server
+$ atp-experiment recv out.bin --connect host:9440 --nocrypto                      # client
+```
+
+Because the client initiates both flows (TCP control + the UDP data flow it
+opens with a first datagram), pull mode works when the client is behind NAT
+and the server is publicly reachable — no port-forwarding, the same way any
+download traverses NAT. (Data still flows server→client; only the
+initiation is client-side.)
+
 ## Why
 
 TCP (and everything on it: scp, rsync, https) reads packet loss as

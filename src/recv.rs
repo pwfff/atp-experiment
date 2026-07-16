@@ -3,6 +3,7 @@
 //! symbols arrive, ack each block, verify sha256, report.
 
 use std::io::Read;
+use std::net::{IpAddr, SocketAddr};
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -10,7 +11,7 @@ use std::time::{Duration, Instant};
 use raptorq::{Decoder, EncodingPacket};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::TlsAcceptor;
 
 use crate::blocks::Layout;
@@ -18,16 +19,23 @@ use crate::datagram::RxPlane;
 use crate::error::{Error, Result};
 use crate::sealed::SymbolOpener;
 use crate::tls;
-use crate::udp::UdpRx;
+use crate::udp::{self, UdpRx};
 use crate::wire::{self, Frame};
 
 #[derive(Debug, clap::Args)]
 pub struct RecvArgs {
     /// Where to write the received file.
     pub output: PathBuf,
-    /// TCP control listen address.
+    /// TCP control listen address (direct mode: the sender dials us).
     #[arg(long, default_value = "0.0.0.0:9440")]
     pub listen: String,
+    /// Pull mode (client-initiated download): connect to this sender
+    /// control address instead of listening, and open the UDP data flow
+    /// out to the sender — the browser/download model. The receiver
+    /// initiates, so it works even behind NAT (the sender must be publicly
+    /// reachable).
+    #[arg(long)]
+    pub connect: Option<String>,
     /// UDP port for the symbol plane (0 = ephemeral, reported to sender).
     #[arg(long, default_value_t = 0)]
     pub udp_port: u16,
@@ -37,20 +45,58 @@ pub struct RecvArgs {
 }
 
 pub async fn run(args: &RecvArgs) -> Result<()> {
-    let listener = TcpListener::bind(&args.listen).await?;
-    let addr = listener.local_addr()?;
-    eprintln!("recv: control listening on {addr}");
-    let identity = if args.nocrypto {
-        eprintln!("recv: PLAINTEXT mode (--nocrypto)");
-        None
+    let identity = build_identity(args)?;
+    if let Some(sender) = &args.connect {
+        eprintln!("recv: pull mode — connecting to sender {sender}");
+        let tcp = connect_with_retry(sender).await?;
+        tcp.set_nodelay(true)?;
+        let peer = tcp.peer_addr()?;
+        eprintln!("recv: control connected to {peer}");
+        handle_connection(tcp, peer, identity, args).await
     } else {
-        let id = tls::Identity::generate()?;
-        eprintln!("recv: cert sha256 fingerprint (give to sender as --pin):");
-        eprintln!("recv:   {}", id.fingerprint());
-        eprintln!("recv: sender runs: atp-experiment send <file> <this-host>:{} --pin {}", addr.port(), id.fingerprint());
-        Some(id)
-    };
-    serve(listener, identity, args).await
+        let listener = TcpListener::bind(&args.listen).await?;
+        let addr = listener.local_addr()?;
+        eprintln!("recv: control listening on {addr}");
+        if let Some(id) = &identity {
+            eprintln!(
+                "recv: sender runs: atp-experiment send <file> <this-host>:{} --pin {}",
+                addr.port(),
+                id.fingerprint()
+            );
+        }
+        serve(listener, identity, args).await
+    }
+}
+
+fn build_identity(args: &RecvArgs) -> Result<Option<tls::Identity>> {
+    if args.nocrypto {
+        eprintln!("recv: PLAINTEXT mode (--nocrypto)");
+        return Ok(None);
+    }
+    let id = tls::Identity::generate()?;
+    eprintln!("recv: cert sha256 fingerprint (give to sender as --pin):");
+    eprintln!("recv:   {}", id.fingerprint());
+    Ok(Some(id))
+}
+
+/// Pull mode connects to the sender; retry briefly so "start the server,
+/// then the client" works without a hard ordering requirement.
+async fn connect_with_retry(addr: &str) -> Result<TcpStream> {
+    let mut last: Option<std::io::Error> = None;
+    for _ in 0..50 {
+        match TcpStream::connect(addr).await {
+            Ok(s) => return Ok(s),
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+                last = Some(e);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(Error::Transfer(format!(
+        "could not reach sender at {addr}: {}",
+        last.map(|e| e.to_string()).unwrap_or_default()
+    )))
 }
 
 /// Accept a single transfer on an already-bound listener (separated from
@@ -63,9 +109,20 @@ pub async fn serve(
     let (tcp, peer) = listener.accept().await?;
     eprintln!("recv: control connection from {peer}");
     tcp.set_nodelay(true)?;
+    handle_connection(tcp, peer, identity, args).await
+}
 
+/// Drive one transfer on an established control TCP stream. The receiver is
+/// the TLS server (cert holder) whichever side connected; `peer` is the
+/// sender's address (its IP is the data-flow target in pull mode).
+async fn handle_connection(
+    tcp: TcpStream,
+    peer: SocketAddr,
+    identity: Option<tls::Identity>,
+    args: &RecvArgs,
+) -> Result<()> {
     match identity {
-        None => handle_transfer(tcp, RxPlane::Plain, args).await,
+        None => handle_transfer(tcp, RxPlane::Plain, peer.ip(), args).await,
         Some(id) => {
             let acceptor = TlsAcceptor::from(id.server_config()?);
             let stream = acceptor
@@ -76,7 +133,13 @@ pub async fn serve(
             let (_, conn) = stream.get_ref();
             let key = tls::export_symbol_key(conn)?;
             eprintln!("recv: sealed session established (TLS 1.3, exporter key derived)");
-            handle_transfer(stream, RxPlane::Sealed(Box::new(SymbolOpener::new(&key))), args).await
+            handle_transfer(
+                stream,
+                RxPlane::Sealed(Box::new(SymbolOpener::new(&key))),
+                peer.ip(),
+                args,
+            )
+            .await
         }
     }
 }
@@ -86,33 +149,76 @@ enum Block {
     Done,
 }
 
-async fn handle_transfer<S>(mut tcp: S, plane: RxPlane, args: &RecvArgs) -> Result<()>
+async fn handle_transfer<S>(
+    mut tcp: S,
+    plane: RxPlane,
+    peer_ip: IpAddr,
+    args: &RecvArgs,
+) -> Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     // --- handshake --------------------------------------------------------
-    let transfer_tag = match wire::read_frame(&mut tcp).await? {
-        Frame::Hello { version, transfer_tag } => {
+    let (transfer_tag, data_port) = match wire::read_frame(&mut tcp).await? {
+        Frame::Hello {
+            version,
+            transfer_tag,
+            data_port,
+        } => {
             if version != wire::VERSION {
                 let err = format!("version mismatch: peer {version}, ours {}", wire::VERSION);
                 let _ = wire::write_frame(
                     &mut tcp,
-                    &Frame::Done { ok: false, error: Some(err.clone()) },
+                    &Frame::Done {
+                        ok: false,
+                        error: Some(err.clone()),
+                    },
                 )
                 .await;
                 return Err(Error::protocol(err));
             }
-            transfer_tag
+            (transfer_tag, data_port)
         }
         f => return Err(Error::protocol(format!("expected Hello, got {f:?}"))),
     };
 
     let mut rx = UdpRx::bind(args.udp_port)?;
-    let udp_port = rx.local_port()?;
-    wire::write_frame(&mut tcp, &Frame::HelloAck { udp_port }).await?;
+    let local_udp_port = rx.local_port()?;
+    // Pull mode: the sender is listening and told us its data port; open the
+    // flow out to it (client-initiated), which also traverses our NAT. Data
+    // still flows sender→receiver — we only initiate the flow.
+    let mut keepalive: Option<tokio::task::JoinHandle<()>> = None;
+    if let Some(sport) = data_port {
+        let sender_udp = SocketAddr::new(peer_ip, sport);
+        eprintln!("recv: pull mode — opening data flow to sender {sender_udp}");
+        for _ in 0..5 {
+            let _ = rx.open_flow(sender_udp, transfer_tag);
+        }
+        keepalive = Some(udp::spawn_flow_keepalive(
+            rx.try_clone_socket()?,
+            sender_udp,
+            transfer_tag,
+        ));
+        wire::write_frame(&mut tcp, &Frame::HelloAck { udp_port: None }).await?;
+    } else {
+        wire::write_frame(
+            &mut tcp,
+            &Frame::HelloAck {
+                udp_port: Some(local_udp_port),
+            },
+        )
+        .await?;
+    }
 
     let (file_name, sha256, layout) = match wire::read_frame(&mut tcp).await? {
-        Frame::Manifest { file_name, file_size, sha256, block_size, symbol_size, num_blocks } => {
+        Frame::Manifest {
+            file_name,
+            file_size,
+            sha256,
+            block_size,
+            symbol_size,
+            num_blocks,
+        } => {
             if file_size == 0 || block_size == 0 || symbol_size == 0 {
                 return Err(Error::protocol("degenerate manifest"));
             }
@@ -128,7 +234,7 @@ where
         f => return Err(Error::protocol(format!("expected Manifest, got {f:?}"))),
     };
     eprintln!(
-        "recv: manifest {file_name}: {} bytes, {} blocks, symbol {} B, udp :{udp_port}, gro {}",
+        "recv: manifest {file_name}: {} bytes, {} blocks, symbol {} B, udp :{local_udp_port}, gro {}",
         layout.file_size,
         layout.num_blocks,
         layout.symbol_size,
@@ -142,8 +248,9 @@ where
 
     // --- symbol collection --------------------------------------------
     let start = Instant::now();
-    let mut blocks: Vec<Block> =
-        (0..layout.num_blocks).map(|_| Block::Pending(None)).collect();
+    let mut blocks: Vec<Block> = (0..layout.num_blocks)
+        .map(|_| Block::Pending(None))
+        .collect();
     let mut decoded: u32 = 0;
     let mut pkts: u64 = 0;
     let mut late_pkts: u64 = 0;
@@ -223,6 +330,9 @@ where
             }
         }
     }
+    if let Some(h) = keepalive.take() {
+        h.abort();
+    }
     drop(blocks);
     file.sync_all()?;
     drop(file);
@@ -231,12 +341,23 @@ where
     let actual = sha256_file(&args.output)?;
     let ok = actual == sha256;
     let error = (!ok).then(|| format!("sha256 mismatch: expected {sha256}, got {actual}"));
-    wire::write_frame(&mut tcp, &Frame::Done { ok, error: error.clone() }).await?;
+    wire::write_frame(
+        &mut tcp,
+        &Frame::Done {
+            ok,
+            error: error.clone(),
+        },
+    )
+    .await?;
 
     let elapsed = start.elapsed().as_secs_f64();
     eprintln!(
         "recv: {} — {} bytes in {elapsed:.2}s ({:.1} Mbit/s), {pkts} pkts, {late_pkts} late",
-        if ok { "complete, sha256 verified" } else { "HASH MISMATCH" },
+        if ok {
+            "complete, sha256 verified"
+        } else {
+            "HASH MISMATCH"
+        },
         layout.file_size,
         layout.file_size as f64 * 8.0 / 1e6 / elapsed,
     );

@@ -3,7 +3,11 @@ use clap::Parser;
 use atp_experiment::{recv, send};
 
 #[derive(Debug, Parser)]
-#[command(name = "atp-experiment", version, about = "RaptorQ transmission protocol demo")]
+#[command(
+    name = "atp-experiment",
+    version,
+    about = "RaptorQ transmission protocol demo"
+)]
 enum Cli {
     /// Send a file to a receiver.
     Send(send::SendArgs),

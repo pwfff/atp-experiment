@@ -17,12 +17,21 @@
 
 use std::io;
 use std::mem;
+use std::mem::MaybeUninit;
 use std::net::SocketAddr;
 use std::os::fd::AsRawFd;
 use std::ptr;
+use std::time::Duration;
 
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::io::unix::AsyncFd;
+
+use crate::datagram;
+
+/// Pull-mode keepalive cadence: re-open the data flow this often so its
+/// NAT mapping can't lapse mid-transfer on a slow link (typical UDP NAT
+/// timeout is ≥30 s), since data otherwise only flows sender→receiver.
+const KEEPALIVE_SECS: u64 = 5;
 
 /// Kernel limit on segments per GSO super-packet (`UDP_MAX_SEGMENTS`).
 pub const MAX_GSO_SEGMENTS: usize = 64;
@@ -56,12 +65,23 @@ impl UdpTx {
         let _ = sock.set_send_buffer_size(SND_BUF);
         sock.connect(&peer.into())?;
         let gso = probe_gso(&sock);
-        Ok(UdpTx { fd: AsyncFd::new(sock)?, gso })
+        Ok(UdpTx {
+            fd: AsyncFd::new(sock)?,
+            gso,
+        })
     }
 
     /// Whether `UDP_SEGMENT` offload is in use.
     pub fn gso(&self) -> bool {
         self.gso
+    }
+
+    fn from_connected(sock: Socket) -> io::Result<Self> {
+        let gso = probe_gso(&sock);
+        Ok(UdpTx {
+            fd: AsyncFd::new(sock)?,
+            gso,
+        })
     }
 
     /// Send a super-buffer of equal-size datagrams (`seg` bytes each; the
@@ -89,6 +109,103 @@ impl UdpTx {
         }
         Ok(())
     }
+}
+
+/// Pull mode (client-initiated download): a UDP socket bound to the
+/// sender's data port, waiting for the receiver to open the data flow.
+/// Bound up front (before the TCP handshake) so an early flow-open is
+/// never missed; once it arrives we connect back to the receiver's address
+/// and hand off a spray-ready [`UdpTx`].
+pub struct UdpFlowAcceptor {
+    fd: AsyncFd<Socket>,
+    port: u16,
+}
+
+impl UdpFlowAcceptor {
+    pub fn bind(port: u16) -> io::Result<Self> {
+        let sock = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+        sock.set_nonblocking(true)?;
+        let _ = sock.set_send_buffer_size(SND_BUF);
+        let _ = sock.set_recv_buffer_size(RCV_BUF);
+        let addr: SocketAddr = format!("0.0.0.0:{port}").parse().expect("static addr");
+        sock.bind(&addr.into())?;
+        let bound = sock
+            .local_addr()?
+            .as_socket()
+            .map(|a| a.port())
+            .unwrap_or(port);
+        Ok(UdpFlowAcceptor {
+            fd: AsyncFd::new(sock)?,
+            port: bound,
+        })
+    }
+
+    /// The bound UDP port (resolved if `bind(0)` was used).
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// Await the receiver's flow-open datagram (carrying `tag`), connect
+    /// back to its source address, and return a sender ready to spray.
+    pub async fn accept_flow(self, tag: u64) -> io::Result<UdpTx> {
+        let peer = loop {
+            let mut guard = self.fd.readable().await?;
+            let res = guard.try_io(|afd| recv_flow_open(afd.get_ref(), tag));
+            match res {
+                Ok(Ok(Some(src))) => break src,
+                Ok(Ok(None)) => continue, // stray / unmatched packet; keep waiting
+                Ok(Err(e)) => return Err(e),
+                Err(_would_block) => continue,
+            }
+        };
+        let sock = self.fd.into_inner();
+        sock.connect(&peer.into())?;
+        UdpTx::from_connected(sock)
+    }
+}
+
+/// Read one datagram; return its source address iff it's a flow-open for
+/// `tag`, else `None` (stray traffic on a public UDP port).
+fn recv_flow_open(sock: &Socket, tag: u64) -> io::Result<Option<SocketAddr>> {
+    let mut buf = [MaybeUninit::<u8>::uninit(); 64];
+    let (n, from) = sock.recv_from(&mut buf)?;
+    // SAFETY: recv_from initialised the first `n` bytes.
+    let bytes = unsafe { &*(&buf[..n] as *const [MaybeUninit<u8>] as *const [u8]) };
+    if datagram::is_flow_open(tag, bytes) {
+        Ok(from.as_socket())
+    } else {
+        Ok(None)
+    }
+}
+
+/// Send one flow-open to `target` from `sock` (best-effort: a full send
+/// buffer is not fatal for a keepalive).
+fn send_flow_open(sock: &Socket, target: SocketAddr, tag: u64) -> io::Result<()> {
+    match sock.send_to(&datagram::flow_open(tag), &target.into()) {
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Spawn a task that re-opens the flow to `target` every [`KEEPALIVE_SECS`]
+/// to keep its NAT mapping alive for the whole transfer. Abort the
+/// returned handle when the transfer completes.
+pub fn spawn_flow_keepalive(
+    sock: Socket,
+    target: SocketAddr,
+    tag: u64,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut iv = tokio::time::interval(Duration::from_secs(KEEPALIVE_SECS));
+        iv.tick().await; // consume the immediate first tick
+        loop {
+            iv.tick().await;
+            if send_flow_open(&sock, target, tag).is_err() {
+                break;
+            }
+        }
+    })
 }
 
 /// Probe `UDP_SEGMENT` support by setting the socket-level default to 0
@@ -198,6 +315,21 @@ impl UdpRx {
     pub fn local_port(&self) -> io::Result<u16> {
         let addr = self.fd.get_ref().local_addr()?;
         Ok(addr.as_socket().map(|a| a.port()).unwrap_or(0))
+    }
+
+    /// Pull mode: open the data flow to the sender from this receive
+    /// socket (the UDP equivalent of a client connect), revealing our
+    /// address so the sender can spray back. Sent as an initial burst,
+    /// then refreshed by [`spawn_flow_keepalive`] on a clone of this socket.
+    pub fn open_flow(&self, sender: SocketAddr, tag: u64) -> io::Result<()> {
+        send_flow_open(self.fd.get_ref(), sender, tag)
+    }
+
+    /// A dup of the receive socket for the keepalive task (the recv loop
+    /// holds `&mut self`, so keepalive flow-opens go out on a separate fd
+    /// sharing the same local port / NAT mapping).
+    pub fn try_clone_socket(&self) -> io::Result<Socket> {
+        self.fd.get_ref().try_clone()
     }
 
     /// Await one `recvmmsg` batch and invoke `f` for every datagram in it

@@ -18,6 +18,29 @@ pub const MAGIC: [u8; 4] = *b"ATP2";
 /// Clear-header length.
 pub const HEADER_LEN: usize = 4 + 8 + 4;
 
+/// Sentinel `block_index` marking a data-flow-open datagram (`u32::MAX`;
+/// no real block ever uses it — see `blocks::Layout`).
+pub const FLOW_OPEN_BLOCK: u32 = u32::MAX;
+
+/// Build a flow-open datagram: plaintext `magic ‖ tag ‖ FLOW_OPEN_BLOCK`,
+/// no payload. In pull mode (client-initiated download) the receiver sends
+/// this first, as the UDP equivalent of a TCP connect: it opens the data
+/// flow to the sender and, because the receiver's own UDP endpoint is only
+/// observable from outside, is how the sender discovers where to spray
+/// (through NAT, as a side effect). Always plaintext-framed even in sealed
+/// mode: it carries no data. Attributable to a transfer by `tag` (a 64-bit
+/// value exchanged over the TLS control channel, so an off-path spoofer
+/// can't forge one) — correlation, not confidentiality.
+pub fn flow_open(transfer_tag: u64) -> Vec<u8> {
+    encode(transfer_tag, FLOW_OPEN_BLOCK, &[])
+}
+
+/// Is `buf` a flow-open datagram for `transfer_tag`?
+pub fn is_flow_open(transfer_tag: u64, buf: &[u8]) -> bool {
+    decode(transfer_tag, buf)
+        .is_some_and(|d| d.block_index == FLOW_OPEN_BLOCK && d.payload.is_empty())
+}
+
 /// A parsed datagram, borrowing the payload from the receive buffer.
 #[derive(Debug)]
 pub struct Datagram<'a> {
@@ -50,7 +73,10 @@ pub fn decode(transfer_tag: u64, buf: &[u8]) -> Option<Datagram<'_>> {
         return None;
     }
     let block_index = u32::from_le_bytes(buf[12..16].try_into().unwrap());
-    Some(Datagram { block_index, payload: &buf[HEADER_LEN..] })
+    Some(Datagram {
+        block_index,
+        payload: &buf[HEADER_LEN..],
+    })
 }
 
 /// Sender-side datagram encoder: plaintext or sealed.
@@ -121,9 +147,7 @@ pub enum RxPlane {
 impl RxPlane {
     pub fn open<'a>(&self, transfer_tag: u64, buf: &'a mut [u8]) -> Option<(u32, &'a [u8])> {
         match self {
-            RxPlane::Plain => {
-                decode(transfer_tag, buf).map(|dg| (dg.block_index, dg.payload))
-            }
+            RxPlane::Plain => decode(transfer_tag, buf).map(|dg| (dg.block_index, dg.payload)),
             RxPlane::Sealed(opener) => sealed::open_datagram(opener, transfer_tag, buf),
         }
     }

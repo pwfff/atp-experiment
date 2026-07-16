@@ -22,7 +22,12 @@ impl Layout {
         assert!(block_size > 0 && symbol_size > 0);
         let num_blocks = file_size.div_ceil(block_size as u64);
         let num_blocks = u32::try_from(num_blocks).expect("block count fits u32");
-        Layout { file_size, block_size, symbol_size, num_blocks }
+        Layout {
+            file_size,
+            block_size,
+            symbol_size,
+            num_blocks,
+        }
     }
 
     /// Byte range of block `index` within the file.

@@ -80,7 +80,10 @@ impl std::fmt::Debug for SymbolSealer {
 impl SymbolSealer {
     /// Build a sealer from TLS-exporter output.
     pub fn new(key: &[u8; SEAL_KEY_LEN]) -> Self {
-        Self { cipher: aead_cipher(key), seq: AtomicU64::new(0) }
+        Self {
+            cipher: aead_cipher(key),
+            seq: AtomicU64::new(0),
+        }
     }
 
     /// Allocate the next datagram sequence number.
@@ -134,7 +137,10 @@ impl std::fmt::Debug for SymbolOpener {
 impl SymbolOpener {
     /// Build an opener from TLS-exporter output.
     pub fn new(key: &[u8; SEAL_KEY_LEN]) -> Self {
-        Self { cipher: aead_cipher(key), window: Mutex::new(ReplayWindow::new()) }
+        Self {
+            cipher: aead_cipher(key),
+            window: Mutex::new(ReplayWindow::new()),
+        }
     }
 
     /// Verify + decrypt `body` in place. The replay window is only advanced
@@ -248,7 +254,11 @@ struct ReplayWindow {
 
 impl ReplayWindow {
     const fn new() -> Self {
-        Self { bitmap: [0u64; REPLAY_WINDOW_WORDS], highest: 0, primed: false }
+        Self {
+            bitmap: [0u64; REPLAY_WINDOW_WORDS],
+            highest: 0,
+            primed: false,
+        }
     }
 
     fn would_accept(&self, seq: u64) -> bool {
@@ -334,7 +344,9 @@ mod tests {
         let seq = sealer.next_seq();
         let tag = sealer.seal_in_place(seq, aad, &mut body).expect("seal");
         assert_ne!(body, plain, "body must be encrypted");
-        opener.open_in_place(seq, aad, &mut body, &tag).expect("open");
+        opener
+            .open_in_place(seq, aad, &mut body, &tag)
+            .expect("open");
         assert_eq!(body, plain);
     }
 
@@ -377,7 +389,9 @@ mod tests {
         let tag = sealer.seal_in_place(seq, aad, &mut body).expect("seal");
 
         let mut copy = body.clone();
-        opener.open_in_place(seq, aad, &mut copy, &tag).expect("first delivery");
+        opener
+            .open_in_place(seq, aad, &mut copy, &tag)
+            .expect("first delivery");
 
         // Exact replay is rejected before any decryption.
         let mut replayed = body.clone();
@@ -397,7 +411,9 @@ mod tests {
         // The legitimate next datagram still opens.
         let mut next = b"payload-two".to_vec();
         let next_seq = sealer.next_seq();
-        let next_tag = sealer.seal_in_place(next_seq, aad, &mut next).expect("seal");
+        let next_tag = sealer
+            .seal_in_place(next_seq, aad, &mut next)
+            .expect("seal");
         opener
             .open_in_place(next_seq, aad, &mut next, &next_tag)
             .expect("next delivery");

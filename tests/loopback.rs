@@ -24,6 +24,16 @@ fn test_data(len: usize, seed: u64) -> Vec<u8> {
     out
 }
 
+/// A free TCP control port + UDP data port for pull-mode tests (bind :0,
+/// read the assigned port, drop). Tiny TOCTOU window, fine for tests.
+fn free_ports() -> (u16, u16) {
+    let t = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let tp = t.local_addr().unwrap().port();
+    let u = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let up = u.local_addr().unwrap().port();
+    (tp, up)
+}
+
 struct TestDir(PathBuf);
 
 impl TestDir {
@@ -69,15 +79,17 @@ async fn transfer(
     let recv_args = RecvArgs {
         output: dst.clone(),
         listen: String::new(),
+        connect: None,
         udp_port: 0,
         nocrypto: !sealed,
     };
-    let recv_task =
-        tokio::spawn(async move { recv::serve(listener, identity, &recv_args).await });
+    let recv_task = tokio::spawn(async move { recv::serve(listener, identity, &recv_args).await });
 
     let send_args = SendArgs {
         file: src,
-        dest: addr.to_string(),
+        dest: Some(addr.to_string()),
+        listen: None,
+        udp_port: 0,
         rate_mbps,
         max_rate_mbps: 5000.0,
         overhead: 5.0,
@@ -99,7 +111,15 @@ async fn transfer(
 async fn sealed_multi_block() {
     // 3.5 MiB across 1 MiB blocks: several full blocks + a short tail,
     // through TLS key exchange + AEAD-sealed datagrams.
-    transfer(3 * 1024 * 1024 + 512 * 1024, 1 << 20, 0xa1b2, true, 0.0, Some(2000.0)).await;
+    transfer(
+        3 * 1024 * 1024 + 512 * 1024,
+        1 << 20,
+        0xa1b2,
+        true,
+        0.0,
+        Some(2000.0),
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -114,7 +134,15 @@ async fn sealed_odd_sizes() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn plaintext_multi_block() {
-    transfer(2 * 1024 * 1024 + 123, 1 << 20, 0x7788, false, 0.0, Some(2000.0)).await;
+    transfer(
+        2 * 1024 * 1024 + 123,
+        1 << 20,
+        0x7788,
+        false,
+        0.0,
+        Some(2000.0),
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -137,6 +165,53 @@ async fn adaptive_rate_survives_loss() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn pull_mode_plaintext() {
+    // Pull mode (client-initiated download, --nocrypto): the sender listens,
+    // the receiver connects and opens the UDP data flow, then the file
+    // streams back sender→receiver. Exercises the flow-open path (the same
+    // one that traverses a receiver's NAT).
+    let dir = TestDir::new("pull");
+    let src = dir.0.join("src.bin");
+    let dst = dir.0.join("dst.bin");
+    let data = test_data(2 * 1024 * 1024 + 321, 0xf00d);
+    std::fs::write(&src, &data).unwrap();
+
+    let (ctrl_port, udp_port) = free_ports();
+    let ctrl = format!("127.0.0.1:{ctrl_port}");
+
+    let send_args = SendArgs {
+        file: src,
+        dest: None,
+        listen: Some(ctrl.clone()),
+        udp_port,
+        rate_mbps: Some(2000.0),
+        max_rate_mbps: 5000.0,
+        overhead: 5.0,
+        symbol_size: 1200,
+        block_size: 1 << 20,
+        pin: None,
+        nocrypto: true,
+        test_drop: 0.0,
+    };
+    let send_task = tokio::spawn(async move { send::run(&send_args).await });
+
+    // The receiver connects out (retrying until the sender is listening).
+    let recv_args = RecvArgs {
+        output: dst.clone(),
+        listen: String::new(),
+        connect: Some(ctrl),
+        udp_port: 0,
+        nocrypto: true,
+    };
+    recv::run(&recv_args).await.expect("recv (pull) succeeds");
+    send_task.await.unwrap().expect("send (pull) succeeds");
+
+    let got = std::fs::read(&dst).unwrap();
+    assert_eq!(got.len(), data.len());
+    assert_eq!(got, data, "received bytes match");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn wrong_pin_is_rejected() {
     let dir = TestDir::new("wrongpin");
     let src = dir.0.join("src.bin");
@@ -151,14 +226,21 @@ async fn wrong_pin_is_rejected() {
     let wrong_pin = tls::Identity::generate().unwrap().fingerprint();
     assert_ne!(wrong_pin, server_identity.fingerprint());
 
-    let recv_args =
-        RecvArgs { output: dst.clone(), listen: String::new(), udp_port: 0, nocrypto: false };
+    let recv_args = RecvArgs {
+        output: dst.clone(),
+        listen: String::new(),
+        connect: None,
+        udp_port: 0,
+        nocrypto: false,
+    };
     let recv_task =
         tokio::spawn(async move { recv::serve(listener, Some(server_identity), &recv_args).await });
 
     let send_args = SendArgs {
         file: src,
-        dest: addr.to_string(),
+        dest: Some(addr.to_string()),
+        listen: None,
+        udp_port: 0,
         rate_mbps: Some(2000.0),
         max_rate_mbps: 5000.0,
         overhead: 5.0,
@@ -168,9 +250,14 @@ async fn wrong_pin_is_rejected() {
         nocrypto: false,
         test_drop: 0.0,
     };
-    let err = send::run(&send_args).await.expect_err("handshake must fail");
+    let err = send::run(&send_args)
+        .await
+        .expect_err("handshake must fail");
     let msg = err.to_string();
-    assert!(msg.contains("TLS handshake failed"), "unexpected error: {msg}");
+    assert!(
+        msg.contains("TLS handshake failed"),
+        "unexpected error: {msg}"
+    );
 
     // Receiver side also errors out (client aborted the handshake).
     assert!(recv_task.await.unwrap().is_err());
@@ -181,7 +268,9 @@ async fn wrong_pin_is_rejected() {
 async fn missing_pin_is_rejected() {
     let send_args = SendArgs {
         file: PathBuf::from("/dev/null"),
-        dest: "127.0.0.1:1".into(),
+        dest: Some("127.0.0.1:1".into()),
+        listen: None,
+        udp_port: 0,
         rate_mbps: Some(1.0),
         max_rate_mbps: 5000.0,
         overhead: 5.0,
@@ -200,7 +289,13 @@ async fn missing_pin_is_rejected() {
     // trust-anything fallback). Bind a listener so connect succeeds.
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let send_args = SendArgs { file: src, dest: addr.to_string(), ..send_args };
-    let err = send::run(&send_args).await.expect_err("must refuse without --pin");
+    let send_args = SendArgs {
+        file: src,
+        dest: Some(addr.to_string()),
+        ..send_args
+    };
+    let err = send::run(&send_args)
+        .await
+        .expect_err("must refuse without --pin");
     assert!(err.to_string().contains("--pin"), "unexpected error: {err}");
 }

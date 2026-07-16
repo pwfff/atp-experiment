@@ -11,7 +11,7 @@ use raptorq::Encoder;
 use rustls::pki_types::ServerName;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_rustls::TlsConnector;
 
@@ -21,15 +21,28 @@ use crate::error::{Error, Result};
 use crate::rate::{self, Pacer, RateController};
 use crate::sealed::SymbolSealer;
 use crate::tls;
-use crate::udp::{self, UdpTx};
+use crate::udp::{self, UdpFlowAcceptor, UdpTx};
 use crate::wire::{self, Frame};
 
 #[derive(Debug, clap::Args)]
 pub struct SendArgs {
     /// File to send.
     pub file: PathBuf,
-    /// Receiver control address, host:port.
-    pub dest: String,
+    /// Receiver control address, host:port (push mode: the sender dials the
+    /// receiver). Omit and pass --listen for pull mode.
+    #[arg(required_unless_present = "listen", conflicts_with = "listen")]
+    pub dest: Option<String>,
+    /// Pull mode (client-initiated download): listen on this control
+    /// address for the receiver to connect and open the data flow, then
+    /// stream the file back — the browser/download model. The receiver
+    /// initiates, so it works even when the receiver is behind NAT and the
+    /// sender is publicly reachable. Data still flows sender→receiver.
+    #[arg(long)]
+    pub listen: Option<String>,
+    /// Pull-mode UDP data port the receiver opens the flow toward (must be
+    /// reachable from the receiver). 0 = ephemeral.
+    #[arg(long, default_value_t = 9441)]
+    pub udp_port: u16,
     /// Fixed pacing rate for the UDP spray, in Mbit/s (0 = unpaced).
     /// Default: adaptive rate control from receiver feedback.
     #[arg(long)]
@@ -63,10 +76,28 @@ enum Feedback {
     Decoded(u32),
     /// Receiver's authenticated-datagram count + observed seq span +
     /// receiver-clock timestamp (ms since transfer start).
-    Progress { pkts: u64, span: Option<u64>, t_ms: u64 },
-    Done { ok: bool, error: Option<String> },
+    Progress {
+        pkts: u64,
+        span: Option<u64>,
+        t_ms: u64,
+    },
+    Done {
+        ok: bool,
+        error: Option<String>,
+    },
     /// Control connection ended without Done.
     Closed(String),
+}
+
+/// How the sender reaches the receiver's UDP symbol plane.
+enum Rendezvous {
+    /// Push: the sender dialed the receiver; spray to the receiver's
+    /// advertised UDP port at the TCP peer IP.
+    Push { peer_ip: IpAddr },
+    /// Pull (client-initiated download): the sender listened; the receiver
+    /// connects and opens the data flow to this pre-bound UDP socket, which
+    /// then connects back to the receiver's address.
+    Pull { acceptor: UdpFlowAcceptor },
 }
 
 /// EWMA loss estimate from receiver Progress reports, over report
@@ -82,7 +113,11 @@ struct LossEstimator {
 
 impl LossEstimator {
     fn new() -> Self {
-        LossEstimator { ewma: 0.0, primed: false, last: None }
+        LossEstimator {
+            ewma: 0.0,
+            primed: false,
+            last: None,
+        }
     }
 
     fn update(&mut self, received: u64, sent: u64) {
@@ -112,7 +147,11 @@ impl LossEstimator {
     /// Repair fraction for round-0 blocks: CLI overhead or the adaptive
     /// estimate (1.5× measured loss + margin), whichever is larger.
     fn round0_frac(&self, cli_frac: f64) -> f64 {
-        let adaptive = if self.primed { self.ewma * 1.5 + 0.02 } else { 0.0 };
+        let adaptive = if self.primed {
+            self.ewma * 1.5 + 0.02
+        } else {
+            0.0
+        };
         cli_frac.max(adaptive).clamp(0.0, 0.8)
     }
 
@@ -139,28 +178,74 @@ pub async fn run(args: &SendArgs) -> Result<()> {
 
     eprintln!(
         "send: {} ({} bytes, {} blocks of ≤{} B, symbol {} B, sha256 {})",
-        file_name, layout.file_size, layout.num_blocks, layout.block_size,
-        layout.symbol_size, &sha256[..16],
+        file_name,
+        layout.file_size,
+        layout.num_blocks,
+        layout.block_size,
+        layout.symbol_size,
+        &sha256[..16],
     );
 
-    // --- connect + key exchange ---------------------------------------
-    let tcp = TcpStream::connect(&args.dest).await?;
-    tcp.set_nodelay(true)?;
-    let peer_ip = tcp.peer_addr()?.ip();
+    // --- establish control connection + rendezvous ---------------------
+    // The sender is always the TLS client (it pins the receiver's cert),
+    // regardless of which side dials TCP.
+    let (tcp, rendezvous) = match (&args.dest, &args.listen) {
+        (Some(dest), None) => {
+            let tcp = TcpStream::connect(dest).await?;
+            tcp.set_nodelay(true)?;
+            let peer_ip = tcp.peer_addr()?.ip();
+            (tcp, Rendezvous::Push { peer_ip })
+        }
+        (None, Some(listen)) => {
+            // Bind the data port up front so an early flow-open is buffered.
+            let acceptor = UdpFlowAcceptor::bind(args.udp_port)?;
+            let listener = TcpListener::bind(listen).await?;
+            eprintln!(
+                "send: pull mode — control listening on {}, data udp :{}",
+                listener.local_addr()?,
+                acceptor.port()
+            );
+            let (tcp, peer) = listener.accept().await?;
+            tcp.set_nodelay(true)?;
+            eprintln!("send: receiver connected from {peer}");
+            (tcp, Rendezvous::Pull { acceptor })
+        }
+        _ => {
+            return Err(Error::Transfer(
+                "pass exactly one of <dest> (push) or --listen (pull)".into(),
+            ))
+        }
+    };
 
     if args.nocrypto {
         eprintln!("send: PLAINTEXT mode (--nocrypto)");
-        return transfer(tcp, TxPlane::Plain, peer_ip, args, &data, &sha256, layout, transfer_tag, file_name).await;
+        return transfer(
+            tcp,
+            TxPlane::Plain,
+            rendezvous,
+            args,
+            &data,
+            &sha256,
+            layout,
+            transfer_tag,
+            file_name,
+        )
+        .await;
     }
 
     let pin_str = args.pin.as_deref().ok_or_else(|| {
-        Error::Transfer("--pin <sha256> required (copy it from `atp-experiment recv` output), or --nocrypto".into())
+        Error::Transfer(
+            "--pin <sha256> required (copy it from `atp-experiment recv` output), or --nocrypto"
+                .into(),
+        )
     })?;
     let pin = tls::parse_pin(pin_str)?;
     let connector = TlsConnector::from(tls::client_config(pin));
     let sni = ServerName::try_from(tls::SNI).expect("static SNI is valid");
     let stream = connector.connect(sni, tcp).await.map_err(|e| {
-        Error::Transfer(format!("TLS handshake failed (wrong --pin, or receiver not atp-experiment?): {e}"))
+        Error::Transfer(format!(
+            "TLS handshake failed (wrong --pin, or receiver not atp-experiment?): {e}"
+        ))
     })?;
 
     // Both sides derive the symbol-plane key from the TLS session; no key
@@ -172,7 +257,7 @@ pub async fn run(args: &SendArgs) -> Result<()> {
     transfer(
         stream,
         TxPlane::Sealed(SymbolSealer::new(&key)),
-        peer_ip,
+        rendezvous,
         args,
         &data,
         &sha256,
@@ -188,7 +273,7 @@ pub async fn run(args: &SendArgs) -> Result<()> {
 async fn transfer<S>(
     mut control: S,
     plane: TxPlane,
-    peer_ip: IpAddr,
+    rendezvous: Rendezvous,
     args: &SendArgs,
     data: &[u8],
     sha256: &str,
@@ -200,9 +285,20 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     // --- control handshake ---------------------------------------------
-    wire::write_frame(&mut control, &Frame::Hello { version: wire::VERSION, transfer_tag })
-        .await?;
-    let udp_port = match wire::read_frame(&mut control).await? {
+    let data_port = match &rendezvous {
+        Rendezvous::Push { .. } => None,
+        Rendezvous::Pull { acceptor } => Some(acceptor.port()),
+    };
+    wire::write_frame(
+        &mut control,
+        &Frame::Hello {
+            version: wire::VERSION,
+            transfer_tag,
+            data_port,
+        },
+    )
+    .await?;
+    let recv_udp_port = match wire::read_frame(&mut control).await? {
         Frame::HelloAck { udp_port } => udp_port,
         f => return Err(Error::protocol(format!("expected HelloAck, got {f:?}"))),
     };
@@ -252,7 +348,30 @@ where
     });
 
     // --- symbol plane -----------------------------------------------------
-    let tx = UdpTx::connect(SocketAddr::new(peer_ip, udp_port))?;
+    let tx = match rendezvous {
+        Rendezvous::Push { peer_ip } => {
+            let port = recv_udp_port
+                .ok_or_else(|| Error::protocol("push mode: receiver advertised no UDP port"))?;
+            UdpTx::connect(SocketAddr::new(peer_ip, port))?
+        }
+        Rendezvous::Pull { acceptor } => {
+            eprintln!(
+                "send: awaiting receiver data-flow open on :{}",
+                acceptor.port()
+            );
+            let tx =
+                tokio::time::timeout(Duration::from_secs(30), acceptor.accept_flow(transfer_tag))
+                    .await
+                    .map_err(|_| {
+                        Error::Transfer(
+                    "timed out waiting for receiver to open the data flow (NAT/firewall blocking?)"
+                        .into(),
+                )
+                    })??;
+            eprintln!("send: data flow open; spraying to receiver");
+            tx
+        }
+    };
 
     // GSO super-buffer geometry: every datagram in a batch has identical
     // wire size (RaptorQ symbols are fixed-size), so one segment size fits.
@@ -271,7 +390,11 @@ where
     };
     eprintln!(
         "send: udp spray: {seg} B datagrams × {max_segs}/batch, gso {}, pacing {}",
-        if tx.gso() { "on" } else { "off (sendmmsg fallback)" },
+        if tx.gso() {
+            "on"
+        } else {
+            "off (sendmmsg fallback)"
+        },
         match args.rate_mbps {
             Some(r) if r > 0.0 => format!("static {r} Mbit/s"),
             Some(_) => "off (unpaced)".into(),
@@ -319,8 +442,9 @@ where
             break 'transfer;
         }
 
-        let pending: Vec<u32> =
-            (0..layout.num_blocks).filter(|&b| !acked[b as usize]).collect();
+        let pending: Vec<u32> = (0..layout.num_blocks)
+            .filter(|&b| !acked[b as usize])
+            .collect();
         if pending.is_empty() || receiver_gone {
             // Everything acked; wait for the receiver's Done (hash verify).
             match tokio::time::timeout(Duration::from_secs(10), fb_rx.recv()).await {
@@ -329,9 +453,7 @@ where
                     break 'transfer;
                 }
                 Ok(Some(_)) => continue,
-                Ok(None) | Err(_) => {
-                    return Err(Error::protocol("receiver never sent Done"))
-                }
+                Ok(None) | Err(_) => return Err(Error::protocol("receiver never sent Done")),
             }
         }
 
@@ -448,7 +570,9 @@ where
     if ok {
         Ok(())
     } else {
-        Err(Error::Transfer(error.unwrap_or_else(|| "receiver reported failure".into())))
+        Err(Error::Transfer(
+            error.unwrap_or_else(|| "receiver reported failure".into()),
+        ))
     }
 }
 
@@ -572,6 +696,9 @@ fn get_encoder<'a>(
 /// the real session via TLS).
 fn fresh_tag() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
     nanos ^ (std::process::id() as u64).rotate_left(32)
 }

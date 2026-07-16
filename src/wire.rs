@@ -10,7 +10,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use crate::error::{Error, Result};
 
 /// Control-protocol version.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 /// Upper bound on a single control frame, to keep a malicious peer from
 /// asking us to buffer gigabytes.
@@ -26,10 +26,20 @@ pub enum Frame {
         /// Random per-transfer tag; echoed in every UDP datagram so the
         /// receiver can discard strays.
         transfer_tag: u64,
+        /// Pull mode (client-initiated download): the sender is listening,
+        /// and this is the UDP port the receiver opens the data flow toward
+        /// (the sender then discovers the receiver's address from that
+        /// first datagram and sprays back). `None` = push mode: the sender
+        /// dials the receiver's advertised `HelloAck.udp_port`. Data always
+        /// flows sender→receiver; this only sets who *initiates* the flow.
+        #[serde(default)]
+        data_port: Option<u16>,
     },
     HelloAck {
-        /// UDP port the receiver bound for the symbol plane.
-        udp_port: u16,
+        /// UDP port the receiver bound for the symbol plane (push mode).
+        /// `None` in pull mode — the sender discovers the receiver's
+        /// address from the flow-open datagram instead.
+        udp_port: Option<u16>,
     },
     Manifest {
         file_name: String,
@@ -42,7 +52,9 @@ pub enum Frame {
     },
     ManifestAck,
     /// Receiver decoded this block; sender can stop generating repair for it.
-    BlockDecoded { index: u32 },
+    BlockDecoded {
+        index: u32,
+    },
     /// Periodic receiver report (~100 ms cadence): authenticated datagrams
     /// received so far, and (sealed mode) the sequence-number span they
     /// arrived from. The sender derives its loss estimate as
@@ -53,9 +65,16 @@ pub enum Frame {
     /// where the packets are counted — sender-side arrival times of these
     /// frames jitter with the return path and would corrupt the delivered-
     /// rate estimate.
-    Progress { pkts: u64, span: Option<u64>, t_ms: u64 },
+    Progress {
+        pkts: u64,
+        span: Option<u64>,
+        t_ms: u64,
+    },
     /// Receiver finished (all blocks decoded and hash checked).
-    Done { ok: bool, error: Option<String> },
+    Done {
+        ok: bool,
+        error: Option<String>,
+    },
 }
 
 /// Write one length-prefixed frame.
@@ -88,8 +107,20 @@ mod tests {
     #[tokio::test]
     async fn round_trip() {
         let frames = [
-            Frame::Hello { version: VERSION, transfer_tag: 0xdead_beef },
-            Frame::HelloAck { udp_port: 12345 },
+            Frame::Hello {
+                version: VERSION,
+                transfer_tag: 0xdead_beef,
+                data_port: None,
+            },
+            Frame::Hello {
+                version: VERSION,
+                transfer_tag: 0x1234,
+                data_port: Some(9441),
+            },
+            Frame::HelloAck {
+                udp_port: Some(12345),
+            },
+            Frame::HelloAck { udp_port: None },
             Frame::Manifest {
                 file_name: "x.bin".into(),
                 file_size: 1,
@@ -100,8 +131,15 @@ mod tests {
             },
             Frame::ManifestAck,
             Frame::BlockDecoded { index: 7 },
-            Frame::Progress { pkts: 123_456, span: Some(130_000), t_ms: 2_500 },
-            Frame::Done { ok: false, error: Some("nope".into()) },
+            Frame::Progress {
+                pkts: 123_456,
+                span: Some(130_000),
+                t_ms: 2_500,
+            },
+            Frame::Done {
+                ok: false,
+                error: Some("nope".into()),
+            },
         ];
         let mut buf = Vec::new();
         for f in &frames {

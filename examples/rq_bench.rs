@@ -20,8 +20,10 @@ fn main() {
     let block_len = block_kib * 1024;
     let num_blocks = (total_mib * 1024 * 1024).div_ceil(block_len);
     let total = num_blocks * block_len;
-    println!("bench: {num_blocks} blocks × {block_kib} KiB, symbol {symbol} B ({} MiB total)",
-        total / (1024 * 1024));
+    println!(
+        "bench: {num_blocks} blocks × {block_kib} KiB, symbol {symbol} B ({} MiB total)",
+        total / (1024 * 1024)
+    );
 
     // Deterministic pseudo-random block (xorshift64*), reused for every block.
     let mut block = vec![0u8; block_len];
@@ -34,8 +36,7 @@ fn main() {
         chunk.copy_from_slice(&bytes[..chunk.len()]);
     }
 
-    let repair_per_block =
-        ((block_len as f64 / symbol as f64) * 0.05).ceil() as u32;
+    let repair_per_block = ((block_len as f64 / symbol as f64) * 0.05).ceil() as u32;
 
     // --- encode -----------------------------------------------------------
     let t = Instant::now();

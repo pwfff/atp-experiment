@@ -147,7 +147,10 @@ impl Pacer {
     }
 
     pub fn new_bps(bytes_per_sec: f64) -> Self {
-        Pacer { bytes_per_sec, next: None }
+        Pacer {
+            bytes_per_sec,
+            next: None,
+        }
     }
 
     pub fn set_rate_bps(&mut self, bytes_per_sec: f64) {
@@ -241,7 +244,12 @@ impl RateController {
         // stand-in (boundary in-flight skew cancels across intervals).
         let span = span.unwrap_or(bytes_sent / self.seg as u64);
         let Some(last) = &self.last else {
-            self.last = Some(Snap { pkts, span, bytes: bytes_sent, t_ms });
+            self.last = Some(Snap {
+                pkts,
+                span,
+                bytes: bytes_sent,
+                t_ms,
+            });
             return None;
         };
         let dt = t_ms.saturating_sub(last.t_ms) as f64 / 1e3;
@@ -251,7 +259,12 @@ impl RateController {
         let dpkts = pkts.saturating_sub(last.pkts);
         let dspan = span.saturating_sub(last.span);
         let dbytes = bytes_sent.saturating_sub(last.bytes);
-        self.last = Some(Snap { pkts, span, bytes: bytes_sent, t_ms });
+        self.last = Some(Snap {
+            pkts,
+            span,
+            bytes: bytes_sent,
+            t_ms,
+        });
         if dspan == 0 || dpkts == 0 {
             // Idle interval, or nothing authenticated yet: no signal (a
             // zero-pkts interval must not be read as 100% loss — the spray
@@ -307,11 +320,18 @@ impl RateController {
         }
 
         self.delivered.push_back((t_ms, delivered));
-        while self.delivered.front().is_some_and(|(t, _)| t + DELIVERED_WINDOW_MS < t_ms) {
+        while self
+            .delivered
+            .front()
+            .is_some_and(|(t, _)| t + DELIVERED_WINDOW_MS < t_ms)
+        {
             self.delivered.pop_front();
         }
-        let max_delivered =
-            self.delivered.iter().map(|(_, d)| *d).fold(0.0f64, f64::max);
+        let max_delivered = self
+            .delivered
+            .iter()
+            .map(|(_, d)| *d)
+            .fold(0.0f64, f64::max);
 
         if self.cooldown > 0 {
             self.cooldown -= 1;
@@ -350,8 +370,7 @@ impl RateController {
                         // receiver ceiling): settle on what the pipe proved
                         // (never raise on exit).
                         self.startup = false;
-                        self.rate = max_delivered
-                            .clamp(MIN_RATE_BPS, self.rate.max(MIN_RATE_BPS));
+                        self.rate = max_delivered.clamp(MIN_RATE_BPS, self.rate.max(MIN_RATE_BPS));
                     }
                 }
             } else {
@@ -401,7 +420,10 @@ mod tests {
     #[test]
     fn converges_to_clean_bottleneck() {
         let r = simulate(500.0, 0.0, 10_000.0, 200);
-        assert!((375.0..650.0).contains(&r), "converged to {r} Mbit/s, want ≈500");
+        assert!(
+            (375.0..650.0).contains(&r),
+            "converged to {r} Mbit/s, want ≈500"
+        );
     }
 
     #[test]
@@ -427,7 +449,10 @@ mod tests {
         // real netem run at 1.5× the bottleneck with 32% loss. Over a long
         // horizon the rate must stay pinned near the bottleneck.
         let r = simulate(500.0, 0.05, 10_000.0, 600);
-        assert!(r < 625.0, "ratcheted to {r} Mbit/s above a 500 Mbit bottleneck");
+        assert!(
+            r < 625.0,
+            "ratcheted to {r} Mbit/s above a 500 Mbit bottleneck"
+        );
         assert!(r > 375.0, "starved to {r} Mbit/s");
     }
 
@@ -468,7 +493,10 @@ mod tests {
             c.on_report(pkts, Some(span), bytes, TICK_MS * (i + 1));
         }
         let r = c.rate_bps() * 8.0 / 1e6;
-        assert!(r > 350.0, "collapsed to {r} Mbit/s under bursty 5% loss, want ≈500");
+        assert!(
+            r > 350.0,
+            "collapsed to {r} Mbit/s under bursty 5% loss, want ≈500"
+        );
         assert!(r < 700.0, "overshot to {r} Mbit/s");
     }
 
@@ -488,7 +516,10 @@ mod tests {
             c.on_report(pkts, None, bytes, TICK_MS * (i + 1));
         }
         let r = c.rate_bps() * 8.0 / 1e6;
-        assert!((375.0..650.0).contains(&r), "converged to {r} Mbit/s, want ≈500");
+        assert!(
+            (375.0..650.0).contains(&r),
+            "converged to {r} Mbit/s, want ≈500"
+        );
     }
 
     #[test]

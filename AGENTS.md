@@ -14,6 +14,19 @@ retransmission. Single binary, `send`/`recv`.
 
 - **Phase:** 4 complete — demo-ready. Adaptive rate control, rootless
   netem harness, WAN-validated vs rsync-ssh, top-level README pitch.
+- **Pull mode (client-initiated download)** added on top of 4: `send
+  --listen`/`recv --connect` invert who dials, so the client opens both the
+  TCP control connection and the UDP data flow (a first `flow_open`
+  datagram — `datagram.rs`; the sender learns the client's address from it,
+  since a NAT'd endpoint is only observable from outside). Data still flows
+  sender→receiver; this just makes it traverse a receiver's NAT the way any
+  download does. Push mode (`send <dest>`) is unchanged/default. Control
+  wire bumped to VERSION 3 (`Hello.data_port`, `HelloAck.udp_port` now
+  optional). Not hole-punching (server is public); no STUN/ICE. Sealed pull
+  mode needs the receiver's cert pinned ahead of time — chicken-and-egg,
+  so pull demos use `--nocrypto` until a persistent/pre-shared identity
+  exists. `spawn_flow_keepalive` refreshes the mapping on slow transfers.
+  Test: `pull_mode_plaintext` in `tests/loopback.rs`.
   - Phase 1: control frames (`src/wire.rs`, length-prefixed JSON over TCP
     — control plane only, data plane is raw byte layout), block layout
     (`src/blocks.rs`), sender spray + feedback-driven repair rounds
@@ -125,6 +138,10 @@ retransmission. Single binary, `send`/`recv`.
   Windows datapath — see PLAN.md non-goals).
 - Plain `cargo build` / `cargo test` locally. No rch, no remote workers,
   no bead/mail tooling in this repo.
+- **Run `cargo fmt` before committing** — the tree must be `cargo fmt
+  --check` clean. Don't hand-format; let rustfmt decide, and don't leave
+  fmt drift for the next session to churn.
+- Keep `cargo clippy --all-targets` warning-free too.
 
 ## Key design facts (from the sealed-tier work that led here)
 
